@@ -1,3 +1,6 @@
+![AnalystKit Architecture](analystkit-architecture.png)<img width="2816" height="1536" alt="Gemini_Generated_Image_57vu2e57vu2e57vu (1)" src="https://github.com/user-attachments/assets/71373898-6192-4f95-9f8b-790001790275" />
+
+
 # AnalystKit
 
 Data quality & analysis toolkit — DAMA six dimensions, workpaper discipline, self-teaching by design.
