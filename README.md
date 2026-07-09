@@ -1,5 +1,4 @@
 ![AnalystKit Architecture](https://github.com/user-attachments/assets/71373898-6192-4f95-9f8b-790001790275)
-![AnalystKit Architecture](https://github.com/user-attachments/assets/71373898-6192-4f95-9f8b-790001790275)
 
 # AnalystKit
 
