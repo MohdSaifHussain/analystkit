@@ -92,7 +92,10 @@ def run_rules(
                 raise AnalystKitError(f"Rule {rid}: allowed needs a 'values' list.")
             placeholders = ", ".join("?" for _ in vals)
             params.extend(str(v) for v in vals)
-            cond = f"{c} IS NOT NULL AND trim({c}) NOT IN ({placeholders})"
+            # CAST before trim: DuckDB auto-types yes/no CSVs as BOOLEAN, and
+            # trim(BOOLEAN) is a binder error. Comparison stays value-level.
+            cond = (f"{c} IS NOT NULL AND "
+                    f"trim(CAST({c} AS VARCHAR)) NOT IN ({placeholders})")
             detail = f"value not in the allowed set ({len(vals)} values)"
         elif kind == "regex":
             pattern = str(r.get("pattern", ""))

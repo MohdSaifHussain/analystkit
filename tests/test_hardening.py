@@ -152,3 +152,28 @@ class TestV20LoopholeFixes:
         with pytest.raises(AnalystKitError, match="not found"):
             reconcile_sources(tmp_path / "ghost.csv", reference_csv,
                               "customer_id", None)
+
+
+class TestAllowedRuleOnTypedColumns:
+    """Found by Delivery Engine integration: DuckDB auto-types yes/no CSV
+    columns as BOOLEAN and trim(BOOLEAN) is a binder error. The allowed
+    rule must cast to VARCHAR before trimming."""
+
+    def test_allowed_rule_on_boolean_column(self, tmp_path: Path) -> None:
+        p = tmp_path / "b.csv"
+        p.write_text("flag\nyes\nno\nyes\n", encoding="utf-8")
+        con = load_source(p)
+        res = run_rules(con, [{
+            "column": "flag", "rule": "allowed", "values": ["true", "false"],
+        }])
+        # BOOLEAN casts to 'true'/'false' - all allowed, no crash
+        assert res[0].failures == 0
+
+    def test_allowed_rule_on_integer_column(self, tmp_path: Path) -> None:
+        p = tmp_path / "i.csv"
+        p.write_text("code\n1\n2\n9\n", encoding="utf-8")
+        con = load_source(p)
+        res = run_rules(con, [{
+            "column": "code", "rule": "allowed", "values": ["1", "2"],
+        }])
+        assert res[0].failures == 1  # the planted 9
