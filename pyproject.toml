@@ -5,9 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "analystkit"
 version = "2.0.0"
-description = "Data quality & analysis toolkit - DAMA six dimensions, workpaper discipline, read-only DB sources, optional AI narrative"
+description = "Data quality & analysis toolkit — DAMA six dimensions, workpaper discipline, re-performable evidence"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "Mohd Saif Hussain" }]
+
+[project.urls]
+Homepage = "https://github.com/MohdSaifHussain/analystkit"
+Repository = "https://github.com/MohdSaifHussain/analystkit"
 dependencies = ["duckdb>=1.5", "openpyxl>=3.1", "pandas>=2.0"]
 
 [project.optional-dependencies]

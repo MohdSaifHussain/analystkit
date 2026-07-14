@@ -1,175 +1,205 @@
-# AnalystKit v2.0 — Design & Learning Guide (Plain English)
+# AnalystKit v2.0 — Design & Learning Guide
 
-Read this twice and you can defend every decision in this toolkit without help.
+Read this once and you can defend every decision in this toolkit without help.
 
 ---
 
 ## 1. What problem does this solve?
 
-Junior analysts at top-tier firms are trained into one discipline before
-anything else: **profile before you analyse, reconcile before you report,
-document everything.** Most self-taught analysts skip all three and get
-their work sent back. AnalystKit builds that discipline into a tool: eight
-commands that make the professional workflow the default workflow.
+Junior analysts at top-tier firms are trained into one discipline before anything
+else: **profile before you analyse, reconcile before you report, document
+everything.** Most self-taught analysts skip all three and get their work sent
+back. AnalystKit builds that discipline into a tool — eight commands that make the
+professional workflow the default workflow.
 
-## 2. The framework: DAMA six dimensions
+---
 
-The DAMA-DMBOK is the closest thing the data profession has to a standard
-reference. Its six data quality dimensions are the industry benchmark:
+## 2. The framework: DAMA-DMBOK six dimensions
 
-- **Completeness** — is anything missing? (null counting)
-- **Uniqueness** — is anything counted twice? (duplicate detection)
-- **Validity** — do values match their expected format? (TRY_CAST ratios,
-  email patterns)
-- **Consistency** — does the same fact appear the same way everywhere?
-  ('Paid' vs 'paid ' vs 'PAID' — the lower(trim()) collision check)
-- **Timeliness** — how fresh is the data? (age of the newest timestamp)
-- **Accuracy** — does it match the real world? **Deliberately NOT scored.**
+The DAMA-DMBOK (Data Management Body of Knowledge) is the closest thing the data
+profession has to an official reference standard. Its six data quality dimensions
+are the industry benchmark, used by regulators, auditors, and data teams globally:
+
+| Dimension | What it measures | How AnalystKit scores it |
+|---|---|---|
+| **Completeness** | Is anything missing? | Null counts and ratios per column |
+| **Uniqueness** | Is anything counted twice? | Exact-row and key-based duplicate detection |
+| **Validity** | Do values match expected formats? | TRY_CAST ratios, regex patterns, range checks |
+| **Consistency** | Does the same fact appear the same way everywhere? | Case and whitespace variant detection (`lower(trim())`) |
+| **Timeliness** | How fresh is the data? | Age of the newest timestamp, linear decay over 90 days |
+| **Accuracy** | Does it match the real world? | **Deliberately not scored — see below.** |
+
+---
 
 ## 3. The decision that matters most: accuracy is never faked
 
-Accuracy means agreement with reality, and no tool can measure that from
-the dataset alone — it requires an authoritative source to compare against.
-Tools that print an "accuracy score" without a reference source are making
-it up. AnalystKit prints "requires reconcile against authoritative source"
-instead, and provides the `reconcile` command to actually do it. Honesty
-about limits is part of the standard, not a weakness in it.
+Accuracy means agreement with reality. No tool can measure that from the dataset
+alone — it requires an authoritative source to compare against. Tools that print an
+"accuracy score" without a reference source are making it up.
+
+AnalystKit prints "requires reconcile against authoritative source" instead, and
+provides the `reconcile` command to actually do it. Honesty about limits is part
+of the standard, not a weakness in it.
+
+---
 
 ## 4. The tie-out (`reconcile`) — three checks, always in order
 
-Row counts first, key matching second, control totals third. Orphan keys
-(records existing on only one side) are findings, never garbage — the
-completeness principle, from the case where a bank missed 1.6 million
-transactions for four years because a feed silently dropped records.
+1. **Row counts** — the simplest check. A feed that arrives with 10,000 rows when
+   12,000 are expected has lost records.
+2. **Key matching** — which records exist on one side only? Orphan keys are
+   findings, never garbage. A bank missed 1.6 million transactions for four years
+   because a feed silently dropped records; row counts looked fine because the
+   totals were close enough that nobody checked the keys.
+3. **Control totals** — do the sums agree? A feed can have matching row counts and
+   matching keys and still have corrupted amounts.
 
-## 4b. What changed in v2.0 — and the official source behind each decision
+Always in this order. Finding a key mismatch before checking totals saves you from
+explaining a total discrepancy that is actually a completeness problem.
 
-**Multi-module src layout.** The single file became a proper package
-(`src/analystkit/`), the layout documented by the Python Packaging
-Authority. `cli.py` contains dispatch only — zero logic — so every
-function stays importable and testable. Install once (`pip install -e .`)
-and both `analystkit` and `python -m analystkit` work.
+---
 
-**Database sources, read-only by construction.** `postgres://` and
-`mysql://` sources attach through DuckDB's official extensions with
-READ_ONLY hardcoded — there is no flag to disable it. An analysis tool
-never needs write access; least privilege is enforced by the code, not
-by policy. Credentials come from environment variables only (PGHOST,
-PGUSER, PGPASSWORD, PGDATABASE), the production pattern in DuckDB's own
-documentation. Credentials are never accepted in the URI or CLI — the
-DuckDB docs warn that connection errors can print the full connection
-string, and CLI arguments leak into shell history. Persistent secrets
-are never used: the docs warn they are stored unencrypted on disk.
-Every error message is redacted against the credential environment
-variables before it is raised — a password can never be echoed, and a
-test proves it.
+## 5. What changed in v2.0 and why
 
-**Three stacked injection defences.** A connected database sits behind:
-(1) READ_ONLY attach — even a successful injection cannot write;
-(2) parameter binding — values can never become SQL (DuckDB Prepared
-Statements docs); (3) validate-then-quote identifiers — names can never
-become SQL (DuckDB Keywords and Identifiers docs). Three independent
-mechanisms, three independent official sources.
+### Multi-module src layout
+The single file became a proper package (`src/analystkit/`), the layout documented
+by the Python Packaging Authority (PyPA). `cli.py` contains dispatch only — zero
+logic — so every function stays importable and testable independently of the CLI.
 
-**Optional AI narrative — the governance signature made explicit.**
-`validate --ai` adds a narrative, under strict architecture: the
-deterministic engine computes ALL findings first; the findings are
-serialized to canonical JSON and SHA-256 hashed (the audit boundary);
-only that JSON goes to the model; the narrative comes back labeled
-"verify against the deterministic findings above" with the input hash
-printed. The AI never writes SQL, never touches data, never produces a
-number. SDK usage follows the official Anthropic Python SDK docs: key
-from ANTHROPIC_API_KEY only, never logged, never in a workpaper. No
-key installed → the feature is cleanly absent and the tool is 100%
-functional. This is the full pattern in one tool: deterministic
-computation → audit boundary → LLM explanation → labeled, hash-verified
-output.
+### Database sources, read-only by construction
+`postgres://` and `mysql://` sources attach through DuckDB's official extensions
+with `READ_ONLY` hardcoded — there is no flag to disable it. Credentials come from
+environment variables only (`PGHOST`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), the
+production pattern in DuckDB's own documentation. Credentials are never accepted
+in the URI or CLI — DuckDB warns that connection errors can print the full
+connection string, and CLI arguments leak into shell history.
 
-## 5. The engineering standards (name them in interviews)
+### Three stacked injection defences
+1. `READ_ONLY` attach — even a successful injection cannot write
+2. Parameter binding — values can never become SQL (DuckDB Prepared Statements
+   documentation)
+3. Validate-then-quote identifiers — names can never become SQL (DuckDB Keywords
+   and Identifiers documentation)
 
-- **DuckDB engine**: SQL directly over CSV/Excel/SQLite; PostgreSQL-
-  compatible dialect, so every practiced query transfers to production
-  warehouses. Any source becomes view `t` — one mental model.
-- **mypy --strict, zero errors**: every type annotation verified.
-- **ruff clean**: the 2026-standard linter, configured in pyproject.toml.
-- **49 pytest tests on the planted-answer principle**: the demo data
-  contains known issues, and the tests verify the tool finds exactly
-  those — never trust a test you cannot independently check. Every
-  hardening fix landed with its own test proving the old failure.
-- **Loophole-hunted, twice**: hostile inputs were thrown at it before
-  release, then a second adversarial review (v1.1) found and fixed four
-  more. Round one: empty datasets warn instead of scoring a meaningless
-  100%; rules naming a nonexistent column fail with a clean message.
-  Round two (each fix verified against DuckDB's official documentation,
-  each with its own planted-answer test):
-    1. **Identifier quoting** — column names containing a double-quote
-       crashed every command. Fixed with SQL-standard escaping (internal
-       quotes doubled), per the DuckDB "Keywords and Identifiers" doc.
-       Even DuckDB's own Python relational API had this bug (issue #15267).
-    2. **Parameter binding** — user-supplied VALUES (range bounds,
-       allowed sets, regex patterns) are now bound as prepared-statement
-       parameters (?), DuckDB's documented SQL-injection defence.
-       Identifiers cannot be parameters in SQL, which is why both
-       mechanisms exist: validate-then-quote for names, bind for values.
-    3. **Clean errors everywhere** — reconcile --key, summarize --by,
-       dedupe --key, and range-on-a-text-column all produced raw
-       tracebacks; every one now raises a readable AnalystKitError
-       listing the real columns.
-    4. **The silent-zero trap** — not_future on a column with no
-       parseable timestamps reported 0 failures and looked perfectly
-       clean while measuring nothing. It now refuses to run and says why.
-       A control that cannot fail is not a control.
-  Plus: the demo's hardcoded clock meant its planted "future" dates
-  decayed into the past within days; it now uses the real clock, and a
-  test proves the not_future rule finds exactly the 6 planted violations.
-- **Frozen slots dataclasses, StrEnum, timezone-aware IST timestamps,
-  atomic Excel writes, no side effects on import, SIGPIPE handled.**
+Three independent mechanisms, three independent official sources. Applying one fix
+to both surfaces would leave one surface open.
 
-## 6. Self-teaching by design
+### Robust CSV loading
+The previous `read_csv_auto` used sample-based auto-detection for the quoting
+character. On large files (13+ million rows), complex fields appear after the
+detection sample window and the auto-detection gets it wrong — producing a
+`_duckdb.InvalidInputException` instead of loading the data.
 
-- `explain <topic>` — built-in lessons on all six dimensions plus
-  reconciliation and workpapers, each with its SQL pattern.
-- `--show-sql` on every analysis command — every use is a SQL lesson.
-- The workpaper's **Learn tab** — the deliverable teaches its reader.
-- The demo prints its **answer key** — you always know what the tool
-  SHOULD find before it runs, so you can verify it, not trust it.
+The fix uses `read_csv` with explicit parameters per DuckDB's official CSV
+documentation:
+- `header=true` — first row is column names (RFC 4180 default)
+- `quote='"'` — RFC 4180 quoting, so a field like `"Insufficient Balance,Technical
+  Glitch"` is ONE value, not two columns
+- `strict_mode=false` — if a row cannot be parsed, record the parse error and
+  continue rather than aborting the load (the same behaviour as Excel and every
+  production CSV tool)
 
-## 7. The workpaper standard
+A regression test plants exactly this pattern (a quoted comma field) and verifies
+the tool loads 3 rows with the field value intact, not 4 columns with a crash.
 
-A workpaper is analysis packaged as evidence: a reviewer must be able to
-re-perform the work from the document alone and get the same answer. The
-`workpaper` command therefore embeds: who ran it, when (IST), on what
-source, with what procedures, what assumptions, and what limitations —
-plus the scorecard, the column profile, the findings, and the lessons.
+### Optional AI narrative
+`validate --ai` adds a narrative under strict architecture:
+- Deterministic engine computes ALL findings first
+- Findings serialized to canonical JSON and SHA-256 hashed — this is the audit
+  boundary
+- Only that JSON reaches the model; the narrative returns labeled "verify against
+  the deterministic findings above" with the input hash printed
+- The AI never writes SQL, never queries data, never produces a number
+- Same findings, same hash — the AI step is re-performable evidence
 
-## 8. Honest limitations
+---
 
-- Rules are declarative but simple: no cross-column logic yet (e.g.
-  "refund date must be after order date").
-- Consistency detection covers case/whitespace variants, not semantic
-  duplicates ("St." vs "Street").
-- Timeliness decays linearly over 90 days — a reasonable default, not a
-  universal truth; different data has different freshness expectations.
-  When the newest timestamp is in the FUTURE, timeliness reads 100% but
-  the profile prints a warning: future-dated records are a validity
-  finding, not freshness.
-- Reconcile accepts CSV on both sides (still — databases are for
-  single-source analysis commands in v2).
-- This is a single-analyst toolkit, not a monitoring platform.
+## 6. Engineering standards — name them in interviews
 
-## 9. The one-line story
+- **DuckDB engine**: SQL directly over CSV, Excel, SQLite, Postgres, MySQL. The
+  PostgreSQL-compatible dialect means every practiced query transfers to production
+  warehouses (Snowflake, BigQuery, Redshift). Any source becomes view `t` — one
+  mental model.
+- **`mypy --strict` zero errors**: every type annotation verified across 15 source
+  files, `py.typed` marker included.
+- **`ruff` clean**: the 2026-standard Python linter, configured in `pyproject.toml`.
+- **58 tests on the planted-answer principle**: every fixture contains known issues
+  and every test verifies the tool finds exactly those — never trust a test you
+  cannot independently verify.
+- **Four adversarial loophole hunts** — fourteen bugs found and closed:
+  - Raw tracebacks on malformed JSON, bad column names, range rules on text columns
+  - A silent-zero trap in `not_future` (a control that cannot fail is not a control)
+  - A hardcoded clock in the demo that caused planted future dates to decay
+  - CSV parser failure on real-world bank exports with quoted multi-value fields
+  - The `ai.py` type narrowing not forward-compatible with SDK type changes
+  Each fix verified against official documentation, each with a regression test
+  proving the old failure.
+- **Frozen slots dataclasses, StrEnum, timezone-aware IST timestamps, atomic Excel
+  writes** (`os.replace` — no partial file on crash), SIGPIPE handled, no side
+  effects on import.
+- **GitHub Actions CI** runs all three gates (ruff, mypy strict, pytest) on every
+  push — green on first commit.
 
-"I built the discipline of a top-tier data team into a toolkit: profile
-before analysing, reconcile before reporting, document everything — with
-the tool teaching its user the SQL and the standards as it works."
+---
 
-## 10. Learning path (four weeks, 15 minutes a day)
+## 7. Self-teaching by design
 
-Week 1: run `demo`, then `profile` and `explain` each dimension. Predict
-what profile will find before running it; check against the answer key.
-Week 2: `validate` and `dedupe` with --show-sql. Read every query. Modify
-rules.json — add a rule, break a rule, understand the failure.
-Week 3: `reconcile` and `summarize` with --show-sql; then the SQL
-cheat sheet patterns by hand via a `query` command in OpsKit.
-Week 4: run `workpaper`, read every tab, and explain the Methodology tab
-out loud to someone. If you can do that, you can do it in an interview.
+- `explain <topic>` — built-in lessons on all six DAMA dimensions, reconciliation,
+  and workpapers, each with its SQL pattern.
+- `--show-sql` on every analysis command — every run is a SQL lesson.
+- The **Learn tab** in the workpaper — the deliverable teaches its reader.
+- The **demo answer key** — printed before the tool runs so you always know what
+  it should find before it does. Verify, do not trust.
+
+---
+
+## 8. The workpaper standard
+
+A workpaper is analysis packaged as evidence: a reviewer must be able to re-perform
+the work from the document alone and get the same answer. The `workpaper` command
+embeds: who ran it, when (IST), on what source, with what procedures, what
+assumptions, what limitations — plus the scorecard, the column profile, the
+findings, and the SQL lessons.
+
+This is the professional standard used by audit teams, compliance functions, and
+data governance teams. The document is the evidence; the tool produces it.
+
+---
+
+## 9. Honest limitations
+
+- Rules are declarative but simple: no cross-column logic yet (e.g. "refund date
+  must be after order date").
+- Consistency detection covers case/whitespace variants, not semantic duplicates
+  ("St." vs "Street").
+- Timeliness decays linearly over 90 days — a reasonable default, not a universal
+  truth. When the newest timestamp is in the future, timeliness reads 100% but the
+  profile prints a warning: future-dated records are a validity finding, not a
+  freshness one.
+- Reconcile accepts CSV on both sides.
+- This is a single-analyst CLI, not a production monitoring platform.
+
+---
+
+## 10. The one-line story for interviews
+
+"I built the discipline of a professional data team into a CLI: profile before
+analysing, reconcile before reporting, document everything — with the tool teaching
+its user the SQL and the standards as it works. Security-first, DAMA-grounded,
+loophole-hunted."
+
+---
+
+## 11. Learning path (four weeks, 15 minutes a day)
+
+**Week 1:** Run `demo`, then `profile` and `explain` each dimension. Predict what
+profile will find before running it; check against the answer key.
+
+**Week 2:** `validate` and `dedupe` with `--show-sql`. Read every query. Edit
+`rules.json` — add a rule, break a rule, understand the failure.
+
+**Week 3:** `reconcile` and `summarize` with `--show-sql`. Then write the SQL
+patterns by hand in a separate DuckDB connection.
+
+**Week 4:** Run `workpaper`, open every tab, and explain the Methodology tab out
+loud to someone. If you can do that, you can do it in an interview.
