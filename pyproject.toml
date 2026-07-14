@@ -10,11 +10,11 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "Mohd Saif Hussain" }]
+dependencies = ["duckdb>=1.5", "openpyxl>=3.1", "pandas>=2.0"]
 
 [project.urls]
 Homepage = "https://github.com/MohdSaifHussain/analystkit"
 Repository = "https://github.com/MohdSaifHussain/analystkit"
-dependencies = ["duckdb>=1.5", "openpyxl>=3.1", "pandas>=2.0"]
 
 [project.optional-dependencies]
 ai = ["anthropic>=0.40"]
