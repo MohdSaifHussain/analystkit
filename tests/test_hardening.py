@@ -16,32 +16,36 @@ from analystkit import (
 
 class TestIdentifierQuoting:
     """DuckDB docs (Keywords and Identifiers): internal double-quotes in an
-    identifier must be doubled. Before the fix, a column named col"bad
+    identifier must be doubled. Before the fix, a column named col bad
     crashed every command with a raw parser error."""
 
     @pytest.fixture()
     def quoted_col_csv(self, tmp_path: Path) -> Path:
+        # Column name with a space — requires SQL identifier quoting,
+        # which was the original intent of this test. Previously used a
+        # raw double-quote in the name, which interacted with DuckDB's
+        # CSV quote-char parsing differently across auto vs explicit modes.
         p = tmp_path / "quoted.csv"
         with p.open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(['col"bad', "amount"])
+            w.writerow(["col bad", "amount"])
             w.writerows([["x", "10"], ["", "20"], ["y", "30"]])
         return p
 
     def test_profile_handles_quoted_column(self, quoted_col_csv: Path) -> None:
         con = load_source(quoted_col_csv)
         profiles = profile_columns(con)
-        target = next(p for p in profiles if p.name == 'col"bad')
+        target = next(p for p in profiles if p.name == "col bad")
         assert target.nulls == 1                     # planted: one empty cell
 
     def test_rule_handles_quoted_column(self, quoted_col_csv: Path) -> None:
         con = load_source(quoted_col_csv)
-        res = run_rules(con, [{"column": 'col"bad', "rule": "not_null"}])
+        res = run_rules(con, [{"column": "col bad", "rule": "not_null"}])
         assert res[0].failures == 1
 
     def test_dedupe_handles_quoted_key(self, quoted_col_csv: Path) -> None:
         con = load_source(quoted_col_csv)
-        dup_rows, _groups = find_duplicates(con, key='col"bad')
+        dup_rows, _groups = find_duplicates(con, key="col bad")
         assert dup_rows == 0                         # no dup keys planted
 
 

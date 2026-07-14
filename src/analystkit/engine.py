@@ -26,9 +26,33 @@ def load_source(
     suffix = path.suffix.lower()
 
     if suffix == ".csv":
-        con.execute(
-            f"CREATE VIEW t AS SELECT * FROM read_csv_auto({_path_lit(path)})"
+        # Explicit read_csv parameters per the DuckDB CSV documentation
+        # (docs.duckdb.org/data/csv/overview.html):
+        #   header=true        first row is column names (RFC 4180 default)
+        #   quote=double-quote RFC 4180 quoting so a field containing a
+        #                      comma inside quotes is ONE value, not two cols
+        #   strict_mode=false  if a row cannot be parsed, record the error
+        #                      and continue — same as Excel and every real
+        #                      production CSV tool; read_csv_auto used
+        #                      sample-based quoting detection which fails on
+        #                      large files where complex rows appear after
+        #                      the detection sample window.
+        dq = '"'   # double-quote literal — avoids nested quotes in f-string
+        sql = (
+            f"CREATE VIEW t AS SELECT * FROM read_csv("
+            f"{_path_lit(path)}, "
+            f"header=true, "
+            f"quote={dq!r}, "
+            f"strict_mode=false)"
         )
+        try:
+            con.execute(sql)
+        except Exception as exc:
+            raise AnalystKitError(
+                f"Could not open {path.name!r} as a CSV file. "
+                f"Verify it is a valid CSV and is not corrupted. "
+                f"DuckDB detail: {exc}"
+            ) from exc
         return con
     if suffix in (".xlsx", ".xls"):
         import pandas as pd

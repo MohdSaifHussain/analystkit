@@ -114,7 +114,8 @@ def narrate_findings(findings: dict[str, Any]) -> tuple[str, str]:
         }],
     )
     narrative = "".join(
-        block.text for block in message.content
+        str(getattr(block, "text", ""))
+        for block in message.content
         if getattr(block, "type", "") == "text"
     ).strip()
     if not narrative:
