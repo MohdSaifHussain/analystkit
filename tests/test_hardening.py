@@ -181,3 +181,83 @@ class TestAllowedRuleOnTypedColumns:
             "column": "code", "rule": "allowed", "values": ["1", "2"],
         }])
         assert res[0].failures == 1  # the planted 9
+
+
+class TestAllowedRuleBooleanCanonicalization:
+    """Found in production by the Delivery Engine fraud run (July 2026):
+    a 500k-row dataset with BOOLEAN columns produced 1.5M false
+    exceptions because DuckDB casts BOOLEAN to VARCHAR as lowercase
+    'true'/'false' while callers naturally write Python bools
+    (str(True) == 'True'), title-case strings, or 1/0. The allowed rule
+    now canonicalizes values for BOOLEAN columns only; VARCHAR
+    categoricals keep strict case-sensitive comparison; an
+    unrecognizable boolean literal is a loud error, never a rule that
+    silently fails every row."""
+
+    def _bool_csv(self, tmp_path: Path) -> Path:
+        p = tmp_path / "b.csv"
+        p.write_text(
+            "flag\n" + "\n".join(
+                "True" if i % 2 else "False" for i in range(10)
+            ) + "\n",
+            encoding="utf-8",
+        )
+        return p
+
+    def test_python_bools_pass(self, tmp_path: Path) -> None:
+        con = load_source(self._bool_csv(tmp_path))
+        res = run_rules(con, [{
+            "column": "flag", "rule": "allowed", "values": [True, False],
+        }])
+        assert res[0].failures == 0
+
+    def test_title_case_strings_pass(self, tmp_path: Path) -> None:
+        con = load_source(self._bool_csv(tmp_path))
+        res = run_rules(con, [{
+            "column": "flag", "rule": "allowed",
+            "values": ["True", "False"],
+        }])
+        assert res[0].failures == 0
+
+    def test_upper_case_and_ints_pass(self, tmp_path: Path) -> None:
+        con = load_source(self._bool_csv(tmp_path))
+        for values in (["TRUE", "FALSE"], [1, 0]):
+            res = run_rules(con, [{
+                "column": "flag", "rule": "allowed", "values": values,
+            }])
+            assert res[0].failures == 0, values
+
+    def test_genuine_violation_still_counted(self, tmp_path: Path) -> None:
+        con = load_source(self._bool_csv(tmp_path))
+        res = run_rules(con, [{
+            "column": "flag", "rule": "allowed", "values": [True],
+        }])
+        assert res[0].failures == 5  # the five False rows
+
+    def test_unrecognizable_boolean_literal_is_a_loud_error(
+        self, tmp_path: Path
+    ) -> None:
+        con = load_source(self._bool_csv(tmp_path))
+        with pytest.raises(AnalystKitError, match="boolean literal"):
+            run_rules(con, [{
+                "column": "flag", "rule": "allowed",
+                "values": ["True", "maybe"],
+            }])
+
+    def test_varchar_columns_keep_case_sensitivity(
+        self, tmp_path: Path
+    ) -> None:
+        """Canonicalization applies to BOOLEAN dtype only - VARCHAR
+        categoricals keep strict, case-sensitive comparison. (Note:
+        a column containing only True/TRUE strings is itself sniffed
+        as BOOLEAN by DuckDB, where case-folding is then CORRECT
+        boolean semantics - so this test uses genuinely non-boolean
+        category names.)"""
+        p = tmp_path / "v.csv"
+        p.write_text("status,pad\nPaid,x\nPAID,x\nPaid,x\n",
+                     encoding="utf-8")
+        con = load_source(p)
+        res = run_rules(con, [{
+            "column": "status", "rule": "allowed", "values": ["Paid"],
+        }])
+        assert res[0].failures == 1  # 'PAID' is a different value

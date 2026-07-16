@@ -90,8 +90,36 @@ def run_rules(
             vals = r.get("values")
             if not isinstance(vals, list) or not vals:
                 raise AnalystKitError(f"Rule {rid}: allowed needs a 'values' list.")
+            # BOOLEAN columns: DuckDB casts BOOLEAN to VARCHAR as
+            # lowercase 'true'/'false', while callers naturally write
+            # Python bools (str(True) == 'True'), title-case strings, or
+            # 1/0 - so every row "failed" the allowed check on perfectly
+            # valid data. Canonicalize the caller's values to DuckDB's
+            # form for BOOLEAN columns only; genuine VARCHAR categoricals
+            # keep strict, case-sensitive comparison (a category named
+            # 'True' and one named 'TRUE' are different values, and this
+            # tool does not get to decide otherwise). An unrecognizable
+            # literal for a BOOLEAN column is a loud error, not a rule
+            # that silently fails every row.
+            if "BOOLEAN" in dtype:
+                canon: list[str] = []
+                for v in vals:
+                    s = str(v).strip().lower()
+                    if s in ("true", "1"):
+                        canon.append("true")
+                    elif s in ("false", "0"):
+                        canon.append("false")
+                    else:
+                        raise AnalystKitError(
+                            f"Rule {rid}: column '{col}' is BOOLEAN but "
+                            f"allowed value {v!r} is not a recognizable "
+                            f"boolean literal. Accepted forms: true/false "
+                            f"(any case), True/False (Python bools), 1/0."
+                        )
+                params.extend(canon)
+            else:
+                params.extend(str(v) for v in vals)
             placeholders = ", ".join("?" for _ in vals)
-            params.extend(str(v) for v in vals)
             # CAST before trim: DuckDB auto-types yes/no CSVs as BOOLEAN, and
             # trim(BOOLEAN) is a binder error. Comparison stays value-level.
             cond = (f"{c} IS NOT NULL AND "

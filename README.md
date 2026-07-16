@@ -258,3 +258,15 @@ running. A test you cannot independently verify is not a test.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## v2.0.1 — boolean canonicalization in the `allowed` rule
+
+Found in production by a Delivery Engine run on a 500k-row transaction
+dataset: DuckDB casts BOOLEAN to VARCHAR as lowercase `true`/`false`,
+while callers naturally write Python bools (`str(True) == 'True'`),
+title-case strings, or `1`/`0` — so every row "failed" the allowed
+check on perfectly valid data (1.5M false exceptions). The `allowed`
+rule now canonicalizes values for BOOLEAN columns only. VARCHAR
+categoricals keep strict, case-sensitive comparison, and an
+unrecognizable boolean literal for a BOOLEAN column is a loud
+`AnalystKitError`, never a rule that silently fails every row.
