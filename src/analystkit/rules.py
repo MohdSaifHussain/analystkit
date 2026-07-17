@@ -101,6 +101,20 @@ def run_rules(
             # tool does not get to decide otherwise). An unrecognizable
             # literal for a BOOLEAN column is a loud error, not a rule
             # that silently fails every row.
+            # v2.0.2 - the CLASS fix. The boolean bug (v2.0.1) was one
+            # member of a family: comparison-domain mismatches at the
+            # type boundary, failing silently per-row. Its siblings were
+            # found by probe: an integer column vs values [1.0, 0.0]
+            # ('1' != '1.0') and a float column vs values [1, 0]
+            # ('1.0' != '1') - 100% false failures on valid data. The
+            # principled fix is to compare each dtype IN ITS OWN DOMAIN:
+            # - BOOLEAN: canonicalize recognized literals (v2.0.1)
+            # - numeric columns: compare NUMERICALLY - no string
+            #   round-trip at all; values must be numbers or numeric
+            #   strings, anything else is a loud error
+            # - everything else: strict string comparison (a category
+            #   named 'True' and one named 'TRUE' stay different)
+            placeholders = ", ".join("?" for _ in vals)
             if "BOOLEAN" in dtype:
                 canon: list[str] = []
                 for v in vals:
@@ -117,13 +131,40 @@ def run_rules(
                             f"(any case), True/False (Python bools), 1/0."
                         )
                 params.extend(canon)
+                cond = (f"{c} IS NOT NULL AND "
+                        f"trim(CAST({c} AS VARCHAR)) NOT IN ({placeholders})")
+            elif any(t in dtype for t in NUMERIC_TYPE_HINTS):
+                nums: list[float] = []
+                for v in vals:
+                    if isinstance(v, bool) or not isinstance(
+                        v, (int, float, str)
+                    ):
+                        raise AnalystKitError(
+                            f"Rule {rid}: column '{col}' is numeric "
+                            f"({dtype}) but allowed value {v!r} is not a "
+                            f"number or numeric string."
+                        )
+                    try:
+                        nums.append(float(v))
+                    except ValueError:
+                        raise AnalystKitError(
+                            f"Rule {rid}: column '{col}' is numeric "
+                            f"({dtype}) but allowed value {v!r} cannot "
+                            f"be read as a number. Numeric columns are "
+                            f"compared numerically - a value the column "
+                            f"could never hold is a rule error, not a "
+                            f"way to fail every row."
+                        ) from None
+                params.extend(nums)
+                # numeric-domain comparison: no VARCHAR cast anywhere
+                cond = (f"{c} IS NOT NULL AND "
+                        f"CAST({c} AS DOUBLE) NOT IN ({placeholders})")
             else:
                 params.extend(str(v) for v in vals)
-            placeholders = ", ".join("?" for _ in vals)
-            # CAST before trim: DuckDB auto-types yes/no CSVs as BOOLEAN, and
-            # trim(BOOLEAN) is a binder error. Comparison stays value-level.
-            cond = (f"{c} IS NOT NULL AND "
-                    f"trim(CAST({c} AS VARCHAR)) NOT IN ({placeholders})")
+                # CAST before trim: DuckDB auto-types yes/no CSVs as
+                # BOOLEAN, and trim(BOOLEAN) is a binder error.
+                cond = (f"{c} IS NOT NULL AND "
+                        f"trim(CAST({c} AS VARCHAR)) NOT IN ({placeholders})")
             detail = f"value not in the allowed set ({len(vals)} values)"
         elif kind == "regex":
             pattern = str(r.get("pattern", ""))

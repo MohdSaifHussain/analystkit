@@ -259,6 +259,21 @@ running. A test you cannot independently verify is not a test.
 
 MIT — see [LICENSE](LICENSE).
 
+## v2.0.2 — per-dtype comparison domains in the `allowed` rule
+
+The v2.0.1 boolean bug turned out to be one member of a FAMILY:
+comparison-domain mismatches at the type boundary, failing silently
+per-row. Probing after the fix found two live siblings — an integer
+column vs `values: [1.0, 0.0]` and a float column vs `values: [1, 0]`
+each produced 100% false failures (`'1'` vs `'1.0'` after VARCHAR
+casting). v2.0.2 closes the class: numeric columns are now compared
+NUMERICALLY (no string round-trip at all; non-numeric allowed values
+are a loud error), booleans keep the v2.0.1 canonicalization, and
+everything else keeps strict string comparison. A type-boundary test
+matrix pins the behavior for every dtype family × caller value style,
+so any regression of this class fails a named test instead of
+shipping.
+
 ## v2.0.1 — boolean canonicalization in the `allowed` rule
 
 Found in production by a Delivery Engine run on a 500k-row transaction

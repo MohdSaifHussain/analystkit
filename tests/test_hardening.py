@@ -261,3 +261,67 @@ class TestAllowedRuleBooleanCanonicalization:
             "column": "status", "rule": "allowed", "values": ["Paid"],
         }])
         assert res[0].failures == 1  # 'PAID' is a different value
+
+
+class TestTypeBoundaryMatrix:
+    """v2.0.2 - the institutional control against the boolean bug's
+    whole FAMILY: comparison-domain mismatches at the type boundary,
+    which fail silently per-row. Found by probe after v2.0.1: an
+    integer column vs values [1.0, 0.0] and a float column vs values
+    [1, 0] each produced 100% false failures. The matrix below pins
+    the allowed rule's behavior for every dtype family x caller value
+    style, so any future regression of this class fails a named test
+    instead of shipping."""
+
+    def _run_one(self, tmp_path: Path, name: str, col_rows: list[str],
+                 values: list) -> int:  # type: ignore[type-arg]
+        p = tmp_path / f"{name}.csv"
+        p.write_text("v\n" + "\n".join(col_rows) + "\n", encoding="utf-8")
+        con = load_source(p)
+        res = run_rules(con, [{
+            "column": "v", "rule": "allowed", "values": values,
+        }])
+        return res[0].failures
+
+    def test_integer_column_accepts_float_and_string_values(
+        self, tmp_path: Path
+    ) -> None:
+        rows = ["1", "0", "1"] * 5
+        assert self._run_one(tmp_path, "i1", rows, [1.0, 0.0]) == 0
+        assert self._run_one(tmp_path, "i2", rows, ["1", "0"]) == 0
+        assert self._run_one(tmp_path, "i3", rows, [1, 0]) == 0
+
+    def test_float_column_accepts_int_and_string_values(
+        self, tmp_path: Path
+    ) -> None:
+        rows = ["1.0", "0.0", "1.5"] * 5
+        assert self._run_one(tmp_path, "f1", rows, [1, 0, 1.5]) == 0
+        assert self._run_one(tmp_path, "f2", rows,
+                             ["1", "0", "1.5"]) == 0
+
+    def test_numeric_column_genuine_violation_still_counted(
+        self, tmp_path: Path
+    ) -> None:
+        rows = ["1", "0", "9"] * 5
+        assert self._run_one(tmp_path, "g1", rows, [1.0, 0.0]) == 5
+
+    def test_numeric_column_non_numeric_value_is_a_loud_error(
+        self, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "n.csv"
+        p.write_text("v\n1\n2\n3\n", encoding="utf-8")
+        con = load_source(p)
+        with pytest.raises(AnalystKitError, match="numeric"):
+            run_rules(con, [{
+                "column": "v", "rule": "allowed",
+                "values": [1, "banana"],
+            }])
+
+    def test_date_column_iso_strings_pass(self, tmp_path: Path) -> None:
+        rows = ["2026-01-01", "2026-01-02"] * 5
+        assert self._run_one(tmp_path, "d1", rows,
+                             ["2026-01-01", "2026-01-02"]) == 0
+
+    def test_varchar_column_stays_strict(self, tmp_path: Path) -> None:
+        rows = ["Paid", "PAID", "Paid"] * 5
+        assert self._run_one(tmp_path, "v1", rows, ["Paid"]) == 5
