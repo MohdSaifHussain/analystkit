@@ -6,6 +6,7 @@ import pytest
 
 from analystkit import (
     AnalystKitError,
+    columns_of,
     find_duplicates,
     load_source,
     profile_columns,
@@ -325,3 +326,101 @@ class TestTypeBoundaryMatrix:
     def test_varchar_column_stays_strict(self, tmp_path: Path) -> None:
         rows = ["Paid", "PAID", "Paid"] * 5
         assert self._run_one(tmp_path, "v1", rows, ["Paid"]) == 5
+
+
+class TestSourceAdapters:
+    """v2.1.0 - Parquet support plus the single-reader principle at the
+    doorstep. Rules, each traced to official documentation:
+    - Parquet loads via DuckDB read_parquet (spec: parquet.apache.org /
+      apache/parquet-format, Thrift IDL authoritative); nested and
+      semi-structured columns (LIST/STRUCT/MAP/UNION and the 2026
+      VARIANT type) are a loud refusal NAMING the columns - this
+      toolkit analyzes tables, never silently flattens.
+    - .xlsx reads via DuckDB's official excel extension (previously
+      pandas - two parsers, one file, the divergence class of the
+      v2.0.x bugs); the documented defaults become disclosed rules:
+      first sheet, numerics as DOUBLE.
+    - .xls is documented as unsupported by the extension: a clean
+      refusal with the remedy, not dependency roulette.
+    - A renamed CSV wearing .parquet dies in the kit's voice, not a
+      raw DuckDB traceback."""
+
+    def _base(self, tmp_path: Path) -> Path:
+        csv = tmp_path / "b.csv"
+        csv.write_text(
+            "record_id,amount,tier\n" + "\n".join(
+                f"R-{i:04d},{10.5 + i},{('a', 'b', 'c')[i % 3]}"
+                for i in range(60)
+            ) + "\n",
+            encoding="utf-8",
+        )
+        return csv
+
+    def test_parquet_loads_and_matches_csv_values(
+        self, tmp_path: Path
+    ) -> None:
+        import duckdb
+
+        csv = self._base(tmp_path)
+        pq = tmp_path / "b.parquet"
+        duckdb.execute(
+            f"COPY (SELECT * FROM read_csv('{csv}')) TO '{pq}' "
+            f"(FORMAT parquet)"
+        )
+        con = load_source(pq)
+        n, total = con.execute(
+            "SELECT COUNT(*), ROUND(SUM(amount), 4) FROM t"
+        ).fetchone()
+        assert n == 60
+        assert total == round(sum(10.5 + i for i in range(60)), 4)
+
+    def test_nested_parquet_refused_naming_columns(
+        self, tmp_path: Path
+    ) -> None:
+        import duckdb
+
+        pq = tmp_path / "nested.parquet"
+        duckdb.execute(
+            f"COPY (SELECT 1 AS id, [1, 2] AS tags, "
+            f"{{'k': 1}} AS meta) TO '{pq}' (FORMAT parquet)"
+        )
+        with pytest.raises(AnalystKitError) as exc:
+            load_source(pq)
+        msg = str(exc.value)
+        assert "tags" in msg and "meta" in msg
+        assert "silent flatten" in msg
+
+    def test_xls_is_a_clean_refusal_with_remedy(
+        self, tmp_path: Path
+    ) -> None:
+        xls = tmp_path / "old.xls"
+        xls.write_bytes(b"\xd0\xcf\x11\xe0 fake")
+        with pytest.raises(AnalystKitError, match=r"\.xlsx"):
+            load_source(xls)
+
+    def test_xlsx_reads_via_duckdb_extension(
+        self, tmp_path: Path
+    ) -> None:
+        import duckdb
+
+        csv = self._base(tmp_path)
+        xlsx = tmp_path / "b.xlsx"
+        con0 = duckdb.connect()
+        con0.execute("INSTALL excel; LOAD excel")
+        con0.execute(
+            f"COPY (SELECT * FROM read_csv('{csv}')) TO '{xlsx}' "
+            f"(FORMAT xlsx, HEADER true)"
+        )
+        con = load_source(xlsx)
+        cols = dict(columns_of(con))
+        # the extension's documented inference: numerics arrive DOUBLE
+        assert cols["amount"] == "DOUBLE"
+        assert con.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 60
+
+    def test_renamed_csv_wearing_parquet_dies_in_our_voice(
+        self, tmp_path: Path
+    ) -> None:
+        fake = tmp_path / "fake.parquet"
+        fake.write_bytes(self._base(tmp_path).read_bytes())
+        with pytest.raises(AnalystKitError, match="renamed CSV"):
+            load_source(fake)

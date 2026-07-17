@@ -54,9 +54,78 @@ def load_source(
                 f"DuckDB detail: {exc}"
             ) from exc
         return con
-    if suffix in (".xlsx", ".xls"):
-        import pandas as pd
-        con.register("t", pd.read_excel(path))
+    if suffix == ".parquet":
+        # v2.1.0 — Apache Parquet (the warehouse-extract lingua franca;
+        # format specification at parquet.apache.org / the parquet-format
+        # repository, Thrift IDL authoritative). Loaded via DuckDB's
+        # native read_parquet.
+        try:
+            con.execute(
+                f"CREATE VIEW t AS SELECT * FROM read_parquet("
+                f"{_path_lit(path)})"
+            )
+        except Exception as exc:
+            raise AnalystKitError(
+                f"Could not open {path.name!r} as a Parquet file. Verify "
+                f"it is a valid Parquet file (a renamed CSV is not one). "
+                f"DuckDB detail: {exc}"
+            ) from exc
+        # Tabular evidence only: nested / semi-structured columns
+        # (LIST, STRUCT, MAP, UNION, and the 2026 Parquet VARIANT type)
+        # are a loud refusal naming the columns - never a silent
+        # flatten. The engine analyzes tables, and says so.
+        nested = [
+            (name, dtype)
+            for name, dtype in columns_of(con)
+            if any(tok in dtype.upper()
+                   for tok in ("STRUCT", "MAP", "UNION", "VARIANT"))
+            or dtype.endswith("[]")
+        ]
+        if nested:
+            named = ", ".join(f"{n} ({t})" for n, t in nested)
+            raise AnalystKitError(
+                f"Parquet file contains nested/semi-structured "
+                f"column(s): {named}. This toolkit analyzes tabular "
+                f"data; flatten or select scalar columns upstream and "
+                f"re-export. (Nested and Variant types are a declared "
+                f"refusal, not a silent flatten.)"
+            )
+        return con
+    if suffix == ".xls":
+        # DuckDB's excel extension documentation is explicit: .xlsx is
+        # supported, .xls is not. A clean refusal with the remedy beats
+        # a dependency-roulette attempt.
+        raise AnalystKitError(
+            f"Legacy .xls is not supported ({path.name}). Save the "
+            f"workbook as .xlsx and retry (DuckDB excel extension "
+            f"supports .xlsx only)."
+        )
+    if suffix == ".xlsx":
+        # v2.1.0 — read via DuckDB's official excel extension instead of
+        # pandas: ONE parser across profile, validation, and any engine
+        # built on this loader (the single-reader principle; the
+        # dual-parser divergence risk retires here). Documented
+        # semantics honored as disclosed rules: the first sheet is the
+        # default; numeric cells are inferred as DOUBLE.
+        try:
+            con.execute("INSTALL excel; LOAD excel")
+        except Exception as exc:
+            raise AnalystKitError(
+                f"The DuckDB excel extension could not be loaded "
+                f"(needed for .xlsx). Install it once with: INSTALL "
+                f"excel; in DuckDB, or check network access to the "
+                f"extension repository. Detail: {exc}"
+            ) from exc
+        try:
+            con.execute(
+                f"CREATE VIEW t AS SELECT * FROM read_xlsx("
+                f"{_path_lit(path)})"
+            )
+        except Exception as exc:
+            raise AnalystKitError(
+                f"Could not open {path.name!r} as an .xlsx workbook. "
+                f"Verify the file is valid. DuckDB detail: {exc}"
+            ) from exc
         return con
     if suffix in (".sqlite", ".db", ".sqlite3"):
         con.execute(f"ATTACH {_path_lit(path)} AS src (TYPE sqlite)")
@@ -77,7 +146,7 @@ def load_source(
         con.execute(f"CREATE VIEW t AS SELECT * FROM src.{_ident(table)}")
         return con
     raise AnalystKitError(
-        f"Unsupported source '{suffix}'. Use .csv, .xlsx, .sqlite or .db."
+        f"Unsupported source '{suffix}'. Use .csv, .parquet, .xlsx, .sqlite or .db."
     )
 
 

@@ -259,6 +259,38 @@ running. A test you cannot independently verify is not a test.
 
 MIT — see [LICENSE](LICENSE).
 
+## v2.1.0 — source adapters: Parquet, and one reader for every format
+
+Adds Apache Parquet support and closes the **dual-parser divergence**
+risk that the v2.0.x bugs came from: `.xlsx` now reads through DuckDB's
+official `excel` extension instead of pandas, so every format —
+CSV, Parquet, `.xlsx`, SQLite — enters through the same DuckDB reader.
+One parser, one set of type semantics, one place for a bug to hide.
+
+Rules, each traced to official documentation:
+
+- **Parquet** (`parquet.apache.org`, spec in `apache/parquet-format`,
+  Thrift IDL authoritative) loads via `read_parquet`. **Nested and
+  semi-structured columns — `LIST`, `STRUCT`, `MAP`, `UNION`, and the
+  Variant type that went official in February 2026 — are a loud refusal
+  naming the offending columns.** This toolkit analyzes tabular data;
+  it never silently flattens.
+- **`.xlsx`** via the DuckDB `excel` extension. Its documented defaults
+  become disclosed rules: the first sheet is read; numeric cells are
+  inferred as `DOUBLE`. A missing extension is a loud error naming the
+  `INSTALL excel;` remedy, never a silent skip.
+- **`.xls`** is documented as unsupported by that extension → a clean
+  refusal with the remedy ("save the workbook as .xlsx"), not
+  dependency roulette.
+- **SQLite** keeps the existing `ATTACH ... (TYPE sqlite)` path and its
+  single-user-table rule.
+- A renamed CSV wearing a `.parquet` suffix dies in the kit's voice with
+  the cause named, not as a raw DuckDB traceback.
+
+Behavior change to note: `.xlsx` numeric columns now arrive as `DOUBLE`
+per the extension's inference, where pandas previously chose its own
+dtypes. Values are unchanged; the recorded dtype string may differ.
+
 ## v2.0.2 — per-dtype comparison domains in the `allowed` rule
 
 The v2.0.1 boolean bug turned out to be one member of a FAMILY:
