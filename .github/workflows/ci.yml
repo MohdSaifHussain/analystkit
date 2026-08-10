@@ -20,4 +20,134 @@ jobs:
       - name: Mypy strict
         run: mypy src/analystkit --strict
       - name: Tests
-        run: pytest -q
+        # --junit-xml is the only change to this step: a machine-readable record
+        # of THIS run, for publish-stats below. It does not alter what runs or
+        # what passes.
+        run: pytest -q --junit-xml=stats-junit.xml
+
+      - name: Upload the test report
+        uses: actions/upload-artifact@v7.0.1   # current release, checked 2026-08-10
+        with:
+          name: junit-report
+          path: stats-junit.xml
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Publish a machine-readable test count for the portfolio site.
+  #
+  # WHY THIS EXISTS. mohdsaifhussain.github.io displays this repo's test count as
+  # a RESUME-STATED BASELINE, because the GitHub API returns no test count — that
+  # site's defect D-02. The recorded upgrade path was: each source repo's CI
+  # publishes a stats.json the site consumes, so the figure becomes MEASURED
+  # rather than asserted. This is that step.
+  #
+  # MEASURED BY THE RUN THAT EXECUTED THE TESTS. The count comes from the JUnit
+  # report the Tests step above produced, carried here as an artifact — not from
+  # a second run, and not from a number anybody typed. A count re-derived by a
+  # different run is a different measurement wearing the same label.
+  #
+  # SCOPE. This job touches no source and no tests. It writes one file,
+  # stats.json, and the guard below fails the job if anything else changed.
+  #
+  # NO RECURSION. A push made with the default GITHUB_TOKEN does not trigger
+  # other workflows, so the commit below cannot re-run this workflow. Here that
+  # is the behaviour we want, and it is stated rather than left to be rediscovered.
+  # ---------------------------------------------------------------------------
+  publish-stats:
+    needs: quality-gates
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # this job only, and only to commit stats.json
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0       # tags, so an exact-match release anchor is visible
+
+      - uses: actions/download-artifact@v8.0.1   # current release, checked 2026-08-10
+        with:
+          name: junit-report
+
+      - name: Compose the snapshot
+        env:
+          COMMIT: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # An EXACT match only. `git describe --tags` alone returns the nearest
+          # tag reachable from HEAD, which would let a commit several changes
+          # past v1.2.3 publish itself as "measured at v1.2.3" — an anchor that
+          # names a version the tests did not run against. The nearest tag is
+          # still recorded, separately and honestly labelled.
+          EXACT="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+          NEAREST="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          python - "$EXACT" "$NEAREST" <<'PY'
+          import datetime, json, os, sys
+          import xml.etree.ElementTree as ET
+
+          exact, nearest = sys.argv[1].strip(), sys.argv[2].strip()
+          root = ET.parse("stats-junit.xml").getroot()
+          suite = root.find("testsuite") if root.tag == "testsuites" else root
+          tests = int(suite.get("tests", 0))
+          failed = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+          skipped = int(suite.get("skipped", 0))
+
+          # Zero is never a measurement here. A collection error, a renamed test
+          # directory or a changed runner would all produce it, and publishing
+          # "0 tests" as a figure would be exactly the fabrication this file
+          # exists to replace.
+          if tests == 0:
+              raise SystemExit("REASON=NO_TESTS_MEASURED  the report counted zero "
+                               "tests; refusing to publish that as a figure")
+
+          commit = os.environ["COMMIT"]
+          payload = {
+              "_generated": ("Machine-written by CI from the JUnit report of the "
+                             "run that executed the tests. Never hand-edited."),
+              "repo": os.environ["REPO"].split("/")[-1],
+              "tests_executed": tests,
+              "tests_passed": tests - failed - skipped,
+              "tests_skipped": skipped,
+              "tests_failed": failed,
+              "commit": commit,
+              "version": exact or commit[:7],
+              "version_type": "release" if exact else "commit",
+              "nearest_tag": nearest or None,
+              "tag_is_head": bool(exact),
+              "measured_at": datetime.datetime.now(datetime.timezone.utc)
+                                     .strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "run_url": os.environ["RUN_URL"],
+              "runner": "pytest",
+          }
+          with open("stats.json", "w", encoding="utf-8", newline="\n") as fh:
+              fh.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+          rm -f stats-junit.xml
+
+      - name: Single-path guard — only stats.json may change
+        run: |
+          CHANGED="$(git status --porcelain | awk '{print $2}')"
+          echo "changed files:"; echo "$CHANGED"
+          for f in $CHANGED; do
+            if [ "$f" != "stats.json" ]; then
+              echo "REASON=OUT_OF_SCOPE_CHANGE  $f"
+              echo "This job may only add or modify stats.json."
+              exit 1
+            fi
+          done
+
+      - name: Commit the snapshot
+        run: |
+          if [ -z "$(git status --porcelain stats.json)" ]; then
+            echo "stats.json unchanged; nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stats.json
+          git commit -m "chore: publish CI-measured test stats
+
+          Counted from the JUnit report of the run that executed the tests.
+          Constrained to stats.json by the single-path guard."
+          git push
