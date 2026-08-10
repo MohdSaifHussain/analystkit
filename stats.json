@@ -1,16 +1,17 @@
 {
   "_generated": "Machine-written by CI from the JUnit report of the run that executed the tests. Never hand-edited.",
-  "commit": "720050969aefa2d627dd8e3d0593c81dc4b082e2",
-  "measured_at": "2026-08-10T01:42:37Z",
+  "commit": "2d908d5852387d8acbd1c449234c1c0975a5679b",
+  "measured_at": "2026-08-10T05:52:12Z",
+  "measured_at_meaning": "When this measurement last CHANGED. The file is committed only when the count or the anchor differs, so this is not the time CI last ran.",
   "nearest_tag": "v2.1.0",
   "repo": "analystkit",
-  "run_url": "https://github.com/MohdSaifHussain/analystkit/actions/runs/31347769562",
+  "run_url": "https://github.com/MohdSaifHussain/analystkit/actions/runs/31359930427",
   "runner": "pytest",
   "tag_is_head": false,
   "tests_executed": 75,
   "tests_failed": 0,
   "tests_passed": 75,
   "tests_skipped": 0,
-  "version": "7200509",
+  "version": "2d908d5",
   "version_type": "commit"
 }
