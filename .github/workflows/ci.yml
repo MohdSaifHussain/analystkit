@@ -104,6 +104,10 @@ jobs:
           payload = {
               "_generated": ("Machine-written by CI from the JUnit report of the "
                              "run that executed the tests. Never hand-edited."),
+              "measured_at_meaning": ("When this measurement last CHANGED. The "
+                                      "file is committed only when the count or "
+                                      "the anchor differs, so this is not the "
+                                      "time CI last ran."),
               "repo": os.environ["REPO"].split("/")[-1],
               "tests_executed": tests,
               "tests_passed": tests - failed - skipped,
@@ -137,10 +141,23 @@ jobs:
             fi
           done
 
-      - name: Commit the snapshot
+      - name: Commit only when the count or the anchor changed
         run: |
-          if [ -z "$(git status --porcelain stats.json)" ]; then
-            echo "stats.json unchanged; nothing to commit"
+          # Owner's ruling, 2026-08-10. A bot commit on every push, differing
+          # only in a timestamp, is history noise with no truth gained in a
+          # flagship source repo. stats.json is committed only when the COUNT or
+          # the ANCHOR differs from what is already committed.
+          #
+          # That is what makes measured_at honest: it means "when this
+          # measurement last CHANGED", not "when CI last ran". The two are
+          # different claims and only one of them is worth a commit.
+          NEW="$(python -c "import json;d=json.load(open('stats.json'));print(d['tests_executed'],d['version'])")"
+          OLD="$(git show HEAD:stats.json 2>/dev/null                  | python -c "import json,sys;d=json.load(sys.stdin);print(d.get('tests_executed'),d.get('version'))"                  2>/dev/null || echo "(not yet published)")"
+          echo "committed: $OLD"
+          echo "measured : $NEW"
+          if [ "$OLD" = "$NEW" ]; then
+            echo "count and anchor unchanged; not committing"
+            git checkout -- stats.json 2>/dev/null || true
             exit 0
           fi
           git config user.name  "github-actions[bot]"
