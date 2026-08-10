@@ -151,8 +151,16 @@ jobs:
           # That is what makes measured_at honest: it means "when this
           # measurement last CHANGED", not "when CI last ran". The two are
           # different claims and only one of them is worth a commit.
-          NEW="$(python -c "import json;d=json.load(open('stats.json'));print(d['tests_executed'],d['version'])")"
-          OLD="$(git show HEAD:stats.json 2>/dev/null                  | python -c "import json,sys;d=json.load(sys.stdin);print(d.get('tests_executed'),d.get('version'))"                  2>/dev/null || echo "(not yet published)")"
+          # The COMMIT SHA IS DELIBERATELY NOT PART OF THIS COMPARISON. For a
+          # repo with no release on HEAD, `version` IS the short SHA, so
+          # including it would make the state differ on every push and this
+          # whole rule would reduce nothing — the first cut of it did exactly
+          # that. What counts as a change is the measured number, or the arrival
+          # of a real release anchor; a new commit that measures the same is not
+          # news.
+          STATE='import json,sys;d=json.load(sys.stdin);print(d.get("tests_executed"), d.get("version") if d.get("version_type")=="release" else "commit-anchored")'
+          NEW="$(python -c "$STATE" < stats.json)"
+          OLD="$(git show HEAD:stats.json 2>/dev/null | python -c "$STATE" 2>/dev/null || echo "(not yet published)")"
           echo "committed: $OLD"
           echo "measured : $NEW"
           if [ "$OLD" = "$NEW" ]; then
