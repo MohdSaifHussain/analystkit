@@ -1,0 +1,16 @@
+{
+  "_generated": "Machine-written by CI from the JUnit report of the run that executed the tests. Never hand-edited.",
+  "commit": "720050969aefa2d627dd8e3d0593c81dc4b082e2",
+  "measured_at": "2026-08-10T01:42:37Z",
+  "nearest_tag": "v2.1.0",
+  "repo": "analystkit",
+  "run_url": "https://github.com/MohdSaifHussain/analystkit/actions/runs/31347769562",
+  "runner": "pytest",
+  "tag_is_head": false,
+  "tests_executed": 75,
+  "tests_failed": 0,
+  "tests_passed": 75,
+  "tests_skipped": 0,
+  "version": "7200509",
+  "version_type": "commit"
+}
